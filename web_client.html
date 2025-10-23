@@ -1,183 +1,141 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Phone Controller</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Phone → PC Controller</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #121212;
-      color: #fff;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      margin: 0;
-    }
-    h2 {
-      color: #4af;
-      margin-bottom: 0.5em;
-    }
-    input, button {
-      margin: 6px;
-      padding: 10px;
-      border: none;
-      border-radius: 8px;
-      font-size: 1em;
-    }
-    input {
-      width: 250px;
-      background: #1e1e1e;
-      color: #fff;
-    }
-    button {
-      background: #4af;
-      color: white;
-      cursor: pointer;
-    }
-    button:hover {
-      background: #67b3ff;
-    }
-    .pad {
-      margin-top: 20px;
-      width: 300px;
-      height: 300px;
-      background: #222;
-      border-radius: 10px;
-      touch-action: none;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      user-select: none;
-    }
-    #status {
-      margin-top: 10px;
-      font-size: 0.9em;
-      color: #aaa;
-    }
+    body { font-family: system-ui, Arial, sans-serif; padding: 16px; max-width: 600px; margin: auto; }
+    button { font-size: 18px; padding: 12px 18px; margin: 8px 0; width: 100%; }
+    .row { display:flex; gap:8px; }
+    input, select { font-size:16px; padding:8px; }
+    .small { width: 48%; }
+    .status { margin: 8px 0; font-weight:600; }
   </style>
 </head>
 <body>
-  <h2>Phone → PC Controller</h2>
+  <h1>Phone → PC Controller</h1>
+  <p>Enter your PC WebSocket address, Pair ID, and pairing token.</p>
 
-  <input id="relay" placeholder="wss://phone-controller-s2pe.onrender.com" />
-  <input id="pair" placeholder="pair123" />
-  <input id="token" placeholder="Token" type="password" />
-  <button id="connectBtn">Connect</button>
+  <input id="wsUrl" type="text" placeholder="wss://PC_URL" style="width:100%; padding:8px; font-size:16px" />
+  <input id="pairIdInput" type="text" placeholder="Pair ID" style="width:100%; padding:8px; font-size:16px; margin-top:8px;" />
+  <input id="tokenInput" type="password" placeholder="Pairing Token" style="width:100%; padding:8px; font-size:16px; margin-top:8px;" />
 
-  <div id="status">Not connected</div>
-
-  <div class="pad" id="touchPad">
-    🖱️ Touchpad
+  <div style="margin-top:8px" class="row">
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
   </div>
 
-  <div>
-    <button id="clickBtn">Left Click</button>
-    <button id="typeBtn">Type 'Hello'</button>
+  <div class="status" id="status">Disconnected</div>
+
+  <h3>Quick Actions</h3>
+  <button id="moveCenter">Move mouse to center (100,100)</button>
+  <button id="clickBtn">Click (left)</button>
+
+  <h3>Custom Actions</h3>
+  <div class="row">
+    <input id="xCoord" type="number" placeholder="x" class="small" />
+    <input id="yCoord" type="number" placeholder="y" class="small" />
   </div>
+  <div class="row" style="margin-top:8px">
+    <button id="moveBtn">Move to x,y</button>
+    <button id="clickAtBtn">Click at x,y</button>
+  </div>
+
+  <div style="margin-top:12px">
+    <input id="typeText" type="text" placeholder="Text to type" style="width:70%;" />
+    <button id="typeBtn" style="width:28%;">Type</button>
+  </div>
+
+  <h3>Response</h3>
+  <pre id="log" style="height:140px; overflow:auto; background:#f6f6f6; padding:8px"></pre>
 
   <script>
-    let ws = null;
-    let connected = false;
+    let ws;
+    const status = document.getElementById('status');
+    const logEl = document.getElementById('log');
 
-    const relayInput = document.getElementById("relay");
-    const pairInput = document.getElementById("pair");
-    const tokenInput = document.getElementById("token");
-    const connectBtn = document.getElementById("connectBtn");
-    const statusEl = document.getElementById("status");
-    const touchPad = document.getElementById("touchPad");
-    const clickBtn = document.getElementById("clickBtn");
-    const typeBtn = document.getElementById("typeBtn");
+    function log(...args) {
+      const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      logEl.textContent = line + '\n' + logEl.textContent;
+    }
 
-    connectBtn.onclick = () => {
-      const relay = relayInput.value.trim();
-      const pairId = pairInput.value.trim();
-      const token = tokenInput.value.trim();
+    document.getElementById('connectBtn').addEventListener('click', () => {
+      const url = document.getElementById('wsUrl').value.trim();
+      const token = document.getElementById('tokenInput').value.trim();
+      const pairId = document.getElementById('pairIdInput').value.trim();
+      if (!url) { alert('Enter WebSocket URL'); return; }
+      if (!pairId) { alert('Enter Pair ID'); return; }
 
-      if (!relay || !pairId || !token) {
-        alert("Please fill in Relay URL, Pair ID, and Token.");
-        return;
-      }
-
-      ws = new WebSocket(relay);
+      ws = new WebSocket(url);
+      status.textContent = 'Connecting...';
 
       ws.onopen = () => {
-        const msg = {
-          type: "register",
-          role: "phone",
-          pairId,
-          token
-        };
-        ws.send(JSON.stringify(msg));
-        connected = true;
-        statusEl.textContent = "✅ Connected to " + relay;
-        console.log("Connected to relay");
+        log('Connected to', url);
+        // Register as phone to relay
+        ws.send(JSON.stringify({ type:'register', role:'phone', pairId, token }));
+        status.textContent = 'Connected';
+        document.getElementById('connectBtn').disabled = true;
+        document.getElementById('disconnectBtn').disabled = false;
+      };
+
+      ws.onmessage = (ev) => {
+        try { 
+          const data = JSON.parse(ev.data); 
+          log('Response:', data); 
+        } catch(e) { log('Message:', ev.data); }
       };
 
       ws.onclose = () => {
-        connected = false;
-        statusEl.textContent = "❌ Disconnected";
+        status.textContent = 'Disconnected';
+        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('disconnectBtn').disabled = true;
+        log('Disconnected');
       };
 
-      ws.onerror = (err) => {
-        connected = false;
-        statusEl.textContent = "⚠️ Connection error";
-        console.error(err);
-      };
+      ws.onerror = (e) => { log('WebSocket error', e); };
+    });
 
-      ws.onmessage = (msg) => {
-        console.log("Server:", msg.data);
-      };
-    };
+    document.getElementById('disconnectBtn').addEventListener('click', () => {
+      if (ws) ws.close();
+    });
 
-    // --- Send helper ---
-    function sendCommand(obj) {
-      if (ws && connected) {
-        ws.send(JSON.stringify(obj));
-      } else {
-        alert("Not connected!");
-      }
+    function send(cmd) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) { alert('Not connected'); return; }
+      log('Sending', cmd);
+      ws.send(JSON.stringify(cmd));
     }
 
-    // --- Buttons ---
-    clickBtn.onclick = () => {
-      sendCommand({ type: "click", button: "left" });
-    };
+    // Quick Actions
+    document.getElementById('moveCenter').addEventListener('click', () => send({type:'move', x:100, y:100, duration:0.2}));
+    document.getElementById('clickBtn').addEventListener('click', () => send({type:'click', button:'left'}));
 
-    typeBtn.onclick = () => {
-      sendCommand({ type: "type", text: "Hello from phone!" });
-    };
-
-    // --- Touchpad movement ---
-    let lastX = null, lastY = null;
-
-    touchPad.addEventListener("touchstart", (e) => {
-      const t = e.touches[0];
-      lastX = t.clientX;
-      lastY = t.clientY;
+    // Custom Actions
+    document.getElementById('moveBtn').addEventListener('click', () => {
+      const x = parseInt(document.getElementById('xCoord').value,10);
+      const y = parseInt(document.getElementById('yCoord').value,10);
+      if (Number.isFinite(x) && Number.isFinite(y)) send({type:'move', x, y, duration:0.2});
+      else alert('Enter numeric x and y');
     });
 
-    touchPad.addEventListener("touchmove", (e) => {
-      e.preventDefault();
-      const t = e.touches[0];
-      if (lastX === null || lastY === null) return;
-
-      const dx = t.clientX - lastX;
-      const dy = t.clientY - lastY;
-
-      // Send relative move
-      sendCommand({ type: "move", x: dx, y: dy, duration: 0 });
-
-      lastX = t.clientX;
-      lastY = t.clientY;
+    document.getElementById('clickAtBtn').addEventListener('click', () => {
+      const x = parseInt(document.getElementById('xCoord').value,10);
+      const y = parseInt(document.getElementById('yCoord').value,10);
+      if (Number.isFinite(x) && Number.isFinite(y)) send({type:'click', x, y, button:'left'});
+      else alert('Enter numeric x and y');
     });
 
-    touchPad.addEventListener("touchend", () => {
-      lastX = null;
-      lastY = null;
+    document.getElementById('typeBtn').addEventListener('click', () => {
+      const t = document.getElementById('typeText').value || '';
+      send({type:'type', text:t, interval:0.03});
     });
+
+    // Default Render server URL
+    (function setDefaultUrl(){
+      const input = document.getElementById('wsUrl');
+      const defaultUrl = 'wss://phone-controller-s2pe.onrender.com';
+      input.value = defaultUrl;
+    })();
   </script>
 </body>
 </html>
