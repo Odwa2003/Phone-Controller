@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Phone → PC Controller</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; padding: 16px; max-width: 600px; margin: auto; }
+    button { font-size: 18px; padding: 12px 18px; margin: 8px 0; width: 100%; }
+    .row { display:flex; gap:8px; }
+    input, select { font-size:16px; padding:8px; }
+    .small { width: 48%; }
+    .status { margin: 8px 0; font-weight:600; }
+  </style>
+</head>
+<body>
+  <h1>Phone → PC Controller</h1>
+  <p>Enter your PC WebSocket address and pairing token.</p>
+
+  <input id="wsUrl" type="text" placeholder="wss://PC_URL" style="width:100%; padding:8px; font-size:16px" />
+  <input id="tokenInput" type="password" placeholder="Pairing Token" style="width:100%; padding:8px; font-size:16px; margin-top:8px;" />
+
+  <div style="margin-top:8px" class="row">
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+  </div>
+
+  <div class="status" id="status">Disconnected</div>
+
+  <h3>Quick Actions</h3>
+  <button id="moveCenter">Move mouse to center (100,100)</button>
+  <button id="clickBtn">Click (left)</button>
+
+  <h3>Custom Actions</h3>
+  <div class="row">
+    <input id="xCoord" type="number" placeholder="x" class="small" />
+    <input id="yCoord" type="number" placeholder="y" class="small" />
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="moveBtn">Move to x,y</button>
+    <button id="clickAtBtn">Click at x,y</button>
+  </div>
+
+  <div style="margin-top:12px">
+    <input id="typeText" type="text" placeholder="Text to type" style="width:70%;" />
+    <button id="typeBtn" style="width:28%;">Type</button>
+  </div>
+
+  <h3>Response</h3>
+  <pre id="log" style="height:140px; overflow:auto; background:#f6f6f6; padding:8px"></pre>
+
+  <script>
+    let ws;
+    const status = document.getElementById('status');
+    const logEl = document.getElementById('log');
+
+    function log(...args) {
+      const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      logEl.textContent = line + '\n' + logEl.textContent;
+    }
+
+    async function authenticate(token) {
+      if (!token) return true; // no token means skip auth
+      return new Promise((resolve) => {
+        ws.send(JSON.stringify({ type:'auth', token }));
+        const listener = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data.auth) {
+              log('✅ Authenticated successfully');
+              ws.removeEventListener('message', listener);
+              resolve(true);
+            } else if (data.error && data.error.includes('Authentication')) {
+              log('❌ Authentication failed:', data.error);
+              ws.removeEventListener('message', listener);
+              resolve(false);
+            }
+          } catch (e) {
+            log('Auth message error', e);
+            resolve(false);
+          }
+        };
+        ws.addEventListener('message', listener);
+      });
+    }
+
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+      const url = document.getElementById('wsUrl').value.trim();
+      const token = document.getElementById('tokenInput').value.trim();
+      if (!url) { alert('Enter WebSocket URL'); return; }
+
+      ws = new WebSocket(url);
+      status.textContent = 'Connecting...';
+
+      ws.onopen = async () => {
+        log('Connected to', url);
+        const authOk = await authenticate(token);
+        if (!authOk) {
+          alert('Authentication failed');
+          ws.close();
+          return;
+        }
+        status.textContent = 'Connected';
+        document.getElementById('connectBtn').disabled = true;
+        document.getElementById('disconnectBtn').disabled = false;
+      };
+
+      ws.onmessage = (ev) => {
+        try { const data = JSON.parse(ev.data); log('Response:', data); }
+        catch(e) { log('Message:', ev.data); }
+      };
+
+      ws.onclose = () => {
+        status.textContent = 'Disconnected';
+        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('disconnectBtn').disabled = true;
+        log('Disconnected');
+      };
+
+      ws.onerror = (e) => { log('WebSocket error', e); };
+    });
+
+    document.getElementById('disconnectBtn').addEventListener('click', () => {
+      if (ws) ws.close();
+    });
+
+    function send(cmd) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) { alert('Not connected'); return; }
+      log('Sending', cmd);
+      ws.send(JSON.stringify(cmd));
+    }
+
+    // Quick Actions
+    document.getElementById('moveCenter').addEventListener('click', () => send({type:'move', x:100, y:100, duration:0.2}));
+    document.getElementById('clickBtn').addEventListener('click', () => send({type:'click'}));
+
+    // Custom Actions
+    document.getElementById('moveBtn').addEventListener('click', () => {
+      const x = parseInt(document.getElementById('xCoord').value,10);
+      const y = parseInt(document.getElementById('yCoord').value,10);
+      if (Number.isFinite(x) && Number.isFinite(y)) send({type:'move', x, y, duration:0.2});
+      else alert('Enter numeric x and y');
+    });
+
+    document.getElementById('clickAtBtn').addEventListener('click', () => {
+      const x = parseInt(document.getElementById('xCoord').value,10);
+      const y = parseInt(document.getElementById('yCoord').value,10);
+      if (Number.isFinite(x) && Number.isFinite(y)) send({type:'click', x, y, button:'left'});
+      else alert('Enter numeric x and y');
+    });
+
+    document.getElementById('typeBtn').addEventListener('click', () => {
+      const t = document.getElementById('typeText').value || '';
+      send({type:'type', text:t, interval:0.03});
+    });
+
+    // Optional default ngrok URL for convenience
+    (function setDefaultUrl(){
+      const input = document.getElementById('wsUrl');
+      const defaultUrl = 'wss://unpracticed-annett-unruminatingly.ngrok-free.dev';
+      input.value = defaultUrl;
+    })();
+  </script>
+</body>
+</html>
