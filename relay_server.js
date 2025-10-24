@@ -15,17 +15,10 @@ wss.on("connection", (ws) => {
     try {
       data = JSON.parse(msg);
     } catch {
-      console.log("❌ Received invalid JSON");
       return ws.send(JSON.stringify({ ok: false, error: "Invalid JSON" }));
     }
 
     const { type, role, pairId } = data;
-
-    // 🛡️ FIX: Check if type exists and is valid
-    if (!type) {
-      console.log("❌ Received message without type");
-      return;
-    }
 
     // 1️⃣ Registration step
     if (type === "register") {
@@ -44,11 +37,7 @@ wss.on("connection", (ws) => {
     }
 
     // 2️⃣ Relay any other message from phone → PC (or PC → phone)
-    if (!pairId || !pairs.has(pairId)) {
-      console.log(`❌ No pair found for pairId: ${pairId}`);
-      return;
-    }
-    
+    if (!pairId || !pairs.has(pairId)) return;
     const entry = pairs.get(pairId);
     const target = role === "phone" ? entry.pc : entry.phone;
 
@@ -67,10 +56,5 @@ wss.on("connection", (ws) => {
       console.log(`❌ ${ws.role} disconnected for ${ws.pairId}`);
       if (!entry.pc && !entry.phone) pairs.delete(ws.pairId);
     }
-  });
-
-  // 🛡️ FIX: Handle unexpected messages
-  ws.on("error", (error) => {
-    console.log(`❌ WebSocket error: ${error}`);
   });
 });
