@@ -22,7 +22,7 @@ pyautogui.FAILSAFE = True
 # ==========================================================
 # Configuration
 # ==========================================================
-RELAY_URL = os.environ.get('RELAY_URL', 'wss://your-render-app.onrender.com')
+RELAY_URL = os.environ.get('RELAY_URL', 'wss://phone-controller-1.onrender.com')
 TOKEN = os.environ.get('PC_AGENT_TOKEN', 'my-secret-token')
 
 # ==========================================================
