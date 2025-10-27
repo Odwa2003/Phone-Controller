@@ -15,7 +15,7 @@ pyautogui.FAILSAFE = True
 
 # Configuration
 RELAY_URL = os.environ.get('RELAY_URL', 'wss://phone-controller-1.onrender.com')
-TOKEN = os.environ.get('PC_AGENT_TOKEN', 'my-secret-token')
+TOKEN = os.environ.get('PC_AGENT_TOKEN', 'your-secret-token')
 
 # Command handlers (same as before)
 async def handle_click(payload: Dict[str, Any]):
