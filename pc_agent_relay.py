@@ -8,6 +8,7 @@ import os
 import pyautogui
 import websockets
 import urllib.parse
+import argparse
 from typing import Any, Dict, List, Tuple
 from pathlib import Path
 
