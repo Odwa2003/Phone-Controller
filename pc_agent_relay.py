@@ -1,4 +1,4 @@
-# pc_agent_ai.py
+# pc_agent_ai_nlp.py
 import asyncio
 import json
 import logging
@@ -9,8 +9,8 @@ import pyautogui
 import websockets
 import urllib.parse
 import argparse
-from typing import Any, Dict, List, Tuple
-from pathlib import Path
+import openai
+from typing import Any, Dict, List, Optional
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('pc_agent')
@@ -22,178 +22,216 @@ pyautogui.FAILSAFE = True
 # ==========================================================
 RELAY_URL = os.environ.get('RELAY_URL', 'wss://phone-controller-1.onrender.com')
 TOKEN = os.environ.get('PC_AGENT_TOKEN', 'helloworld')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
 # ==========================================================
-# Safe Command Mapping
+# AI/NLP Layer with OpenAI
 # ==========================================================
 
-class CommandMapper:
-    """Maps natural language to safe, approved actions"""
+class AINLPProcessor:
+    """Uses OpenAI API to convert natural language to structured commands"""
+    
+    def __init__(self, api_key: str):
+        if api_key:
+            openai.api_key = api_key
+            self.enabled = True
+        else:
+            self.enabled = False
+            logger.warning("OpenAI API key not provided. AI/NLP layer disabled.")
+        
+        # Fallback pattern matcher for when AI is unavailable
+        self.pattern_matcher = PatternMatcher()
+        
+        # System prompt for the AI
+        self.system_prompt = """You are a PC control assistant that converts natural language commands into structured JSON actions.
+
+Available actions:
+- open_app: Open applications (chrome, notepad, calculator, etc.)
+- navigate_url: Open specific websites in browser
+- mouse_click: Click at coordinates or current position
+- mouse_move: Move mouse to coordinates
+- mouse_scroll: Scroll up/down
+- keyboard_type: Type text
+- keyboard_press: Press specific keys
+- system_command: Lock, sleep, shutdown, restart
+
+Always respond with valid JSON only, no other text.
+
+Example conversions:
+User: "Can you open YouTube?"
+Output: {"intent": "navigate_url", "target": "youtube.com"}
+
+User: "Please click at position 100,200"
+Output: {"intent": "mouse_click", "x": 100, "y": 200}
+
+User: "Type hello world and press enter"
+Output: {"intent": "keyboard_type", "text": "hello world", "then_press": "enter"}
+
+User: "Move mouse to the center and right click"
+Output: {"intent": "mouse_move", "x": 960, "y": 540}, {"intent": "mouse_click", "button": "right"}
+
+User: "Open Chrome and go to google"
+Output: [{"intent": "open_app", "target": "chrome"}, {"intent": "navigate_url", "target": "google.com"}]
+
+User: "Lock my computer"
+Output: {"intent": "system_command", "action": "lock"}"""
+
+    async def process_command(self, text: str) -> List[Dict[str, Any]]:
+        """Convert natural language to structured commands using AI"""
+        if not self.enabled:
+            logger.info("AI/NLP disabled, using pattern matching fallback")
+            return self.pattern_matcher.parse_command(text)
+        
+        try:
+            logger.info(f"🤖 Processing AI command: '{text}'")
+            
+            response = await openai.ChatCompletion.acreate(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.1,
+                max_tokens=500
+            )
+            
+            ai_response = response.choices[0].message.content.strip()
+            logger.info(f"AI Raw Response: {ai_response}")
+            
+            # Parse JSON response
+            commands = self._parse_ai_response(ai_response)
+            logger.info(f"Parsed AI Commands: {commands}")
+            
+            return commands
+            
+        except Exception as e:
+            logger.error(f"AI processing failed: {e}. Using fallback pattern matching.")
+            return self.pattern_matcher.parse_command(text)
+    
+    def _parse_ai_response(self, ai_response: str) -> List[Dict[str, Any]]:
+        """Parse AI response into command list"""
+        try:
+            # Clean the response (remove markdown code blocks if present)
+            cleaned_response = re.sub(r'```json\n?|\n?```', '', ai_response).strip()
+            
+            # Try to parse as single command or array of commands
+            if cleaned_response.startswith('['):
+                commands = json.loads(cleaned_response)
+            else:
+                commands = [json.loads(cleaned_response)]
+            
+            # Add metadata
+            for cmd in commands:
+                cmd['ai_processed'] = True
+                cmd['confidence'] = 0.95
+                
+            return commands
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse AI JSON response: {e}")
+            return [{
+                'intent': 'keyboard_type',
+                'text': f"Error: Could not understand command. AI said: {ai_response}",
+                'ai_processed': False,
+                'confidence': 0.0
+            }]
+
+class PatternMatcher:
+    """Fallback pattern matcher when AI is unavailable"""
     
     def __init__(self):
-        # Approved applications that can be opened
         self.approved_apps = {
-            'chrome': 'chrome',
-            'google chrome': 'chrome',
-            'browser': 'chrome',
-            'notepad': 'notepad',
-            'calculator': 'calc',
-            'paint': 'mspaint',
-            'file explorer': 'explorer',
-            'word': 'winword',
-            'excel': 'excel',
-            'powerpoint': 'powerpnt',
-            'vs code': 'code',
-            'visual studio code': 'code',
-            'command prompt': 'cmd',
-            'terminal': 'cmd',
-            'task manager': 'taskmgr',
-            'control panel': 'control',
+            'chrome': 'chrome', 'browser': 'chrome', 'google chrome': 'chrome',
+            'notepad': 'notepad', 'calculator': 'calc', 'paint': 'mspaint',
+            'file explorer': 'explorer', 'explorer': 'explorer', 'files': 'explorer',
+            'word': 'winword', 'excel': 'excel', 'powerpoint': 'powerpnt',
+            'vs code': 'code', 'code': 'code', 'command prompt': 'cmd',
+            'terminal': 'cmd', 'task manager': 'taskmgr', 'control panel': 'control',
         }
         
-        # Approved system commands
-        self.approved_commands = {
-            'shutdown': 'shutdown /s /t 0',
-            'restart': 'shutdown /r /t 0',
-            'lock': 'rundll32.exe user32.dll,LockWorkStation',
-            'sleep': 'rundll32.exe powrprof.dll,SetSuspendState 0,1,0',
-        }
-        
-        # Mouse and keyboard patterns
-        self.mouse_patterns = {
-            r'click(?:\s+(?:left|right|middle))?': 'click',
-            r'right click': 'right_click',
-            r'double click': 'double_click',
-            r'scroll (up|down)': 'scroll',
-            r'move mouse (?:to )?(\d+)[, ]\s*(\d+)': 'move_to',
-        }
-        
-        # Keyboard patterns
-        self.keyboard_patterns = {
-            r'type (.+)': 'type_text',
-            r'press (enter|space|tab|escape|esc|backspace|delete|up|down|left|right)': 'press_key',
-            r'hotkey (ctrl|ctrl\+|alt|alt\+|shift|shift\+|win|win\+)(.+)': 'hotkey',
+        self.websites = {
+            'youtube': 'youtube.com', 'google': 'google.com', 'github': 'github.com',
+            'facebook': 'facebook.com', 'twitter': 'twitter.com', 'reddit': 'reddit.com',
+            'gmail': 'gmail.com', 'outlook': 'outlook.com', 'amazon': 'amazon.com',
         }
 
-    def sanitize_input(self, text: str) -> str:
-        """Remove potentially dangerous characters"""
-        # Remove command injection characters
-        sanitized = re.sub(r'[;&|`$]', '', text)
-        return sanitized.strip()
-
-    def parse_command(self, text: str) -> Dict[str, Any]:
-        """Parse natural language and return action command"""
-        text = self.sanitize_input(text.lower())
-        logger.info(f"Parsing command: '{text}'")
+    def parse_command(self, text: str) -> List[Dict[str, Any]]:
+        """Fallback pattern-based command parsing"""
+        text = text.lower().strip()
+        commands = []
         
-        # Check for application launch
+        # Check for app opening
         for app_name, app_cmd in self.approved_apps.items():
             if app_name in text:
-                return {
-                    'type': 'launch_app',
-                    'app': app_cmd,
+                commands.append({
+                    'intent': 'open_app',
+                    'target': app_cmd,
                     'original_text': text,
-                    'confidence': 0.9
-                }
+                    'ai_processed': False,
+                    'confidence': 0.7
+                })
+                return commands
         
-        # Check for system commands
-        for cmd_name, cmd in self.approved_commands.items():
-            if cmd_name in text:
-                return {
-                    'type': 'system_command',
-                    'command': cmd,
+        # Check for website navigation
+        for site_name, site_url in self.websites.items():
+            if site_name in text:
+                commands.append({
+                    'intent': 'navigate_url', 
+                    'target': site_url,
                     'original_text': text,
-                    'confidence': 0.9
-                }
+                    'ai_processed': False,
+                    'confidence': 0.7
+                })
+                return commands
         
-        # Check mouse patterns
-        for pattern, action in self.mouse_patterns.items():
-            match = re.search(pattern, text)
-            if match:
-                if action == 'move_to':
-                    x, y = int(match.group(1)), int(match.group(2))
-                    return {
-                        'type': 'move',
-                        'x': x, 'y': y,
-                        'original_text': text,
-                        'confidence': 0.8
-                    }
-                elif action == 'click':
-                    return {
-                        'type': 'click',
-                        'button': 'left',
-                        'original_text': text,
-                        'confidence': 0.8
-                    }
-                elif action == 'right_click':
-                    return {
-                        'type': 'click',
-                        'button': 'right', 
-                        'original_text': text,
-                        'confidence': 0.8
-                    }
-                elif action == 'double_click':
-                    return {
-                        'type': 'double_click',
-                        'original_text': text,
-                        'confidence': 0.8
-                    }
-                elif action == 'scroll':
-                    direction = match.group(1)
-                    return {
-                        'type': 'scroll',
-                        'direction': direction,
-                        'original_text': text,
-                        'confidence': 0.7
-                    }
+        # Check for coordinates
+        coord_match = re.search(r'(\d+)[, ]\s*(\d+)', text)
+        if coord_match and ('click' in text or 'move' in text):
+            x, y = int(coord_match.group(1)), int(coord_match.group(2))
+            if 'click' in text:
+                button = 'right' if 'right' in text else 'left'
+                commands.append({
+                    'intent': 'mouse_click',
+                    'x': x, 'y': y,
+                    'button': button,
+                    'original_text': text,
+                    'ai_processed': False,
+                    'confidence': 0.8
+                })
+            else:
+                commands.append({
+                    'intent': 'mouse_move',
+                    'x': x, 'y': y,
+                    'original_text': text,
+                    'ai_processed': False,
+                    'confidence': 0.8
+                })
+            return commands
         
-        # Check keyboard patterns
-        for pattern, action in self.keyboard_patterns.items():
-            match = re.search(pattern, text)
-            if match:
-                if action == 'type_text':
-                    text_to_type = match.group(1)
-                    return {
-                        'type': 'type',
-                        'text': text_to_type,
-                        'original_text': text,
-                        'confidence': 0.8
-                    }
-                elif action == 'press_key':
-                    key = match.group(1)
-                    key_map = {
-                        'enter': 'enter', 'space': 'space', 'tab': 'tab',
-                        'escape': 'escape', 'esc': 'escape', 'backspace': 'backspace',
-                        'delete': 'delete', 'up': 'up', 'down': 'down',
-                        'left': 'left', 'right': 'right'
-                    }
-                    return {
-                        'type': 'press_key',
-                        'key': key_map.get(key, key),
-                        'original_text': text,
-                        'confidence': 0.8
-                    }
-        
-        # Default: treat as typing if no other pattern matches
-        return {
-            'type': 'type',
+        # Default to typing
+        commands.append({
+            'intent': 'keyboard_type',
             'text': text,
             'original_text': text,
+            'ai_processed': False,
             'confidence': 0.3
-        }
+        })
+        
+        return commands
 
 # ==========================================================
 # Enhanced Command Handlers
 # ==========================================================
 
-command_mapper = CommandMapper()
+ai_processor = AINLPProcessor(OPENAI_API_KEY)
 
-async def handle_launch_app(payload: Dict[str, Any]):
-    """Safely launch approved applications"""
-    app = payload.get('app')
-    if app in command_mapper.approved_apps.values():
+async def handle_open_app(payload: Dict[str, Any]):
+    """Open approved applications"""
+    app = payload.get('target')
+    approved_apps = ai_processor.pattern_matcher.approved_apps
+    if app in approved_apps.values():
         try:
-            logger.info(f'Launching application: {app}')
+            logger.info(f'🚀 Launching application: {app}')
             if os.name == 'nt':  # Windows
                 subprocess.Popen(app, shell=True)
             else:  # macOS/Linux
@@ -205,130 +243,197 @@ async def handle_launch_app(payload: Dict[str, Any]):
     else:
         return {'ok': False, 'error': 'Application not approved'}
 
-async def handle_system_command(payload: Dict[str, Any]):
-    """Execute approved system commands"""
-    command = payload.get('command')
-    if command in command_mapper.approved_commands.values():
-        try:
-            logger.info(f'Executing system command: {command}')
-            subprocess.run(command, shell=True, timeout=5)
-            return {'ok': True, 'message': 'Command executed'}
-        except subprocess.TimeoutExpired:
-            logger.warning('Command timed out')
-            return {'ok': True, 'message': 'Command initiated'}
-        except Exception as e:
-            logger.error(f'Command failed: {e}')
-            return {'ok': False, 'error': 'Command failed'}
-    else:
-        return {'ok': False, 'error': 'Command not approved'}
-
-async def handle_double_click(payload: Dict[str, Any]):
-    """Handle double click"""
+async def handle_navigate_url(payload: Dict[str, Any]):
+    """Navigate to website in browser"""
+    url = payload.get('target')
+    if not url.startswith(('http://', 'https://')):
+        url = f'https://{url}'
+    
     try:
-        pyautogui.doubleClick()
-        logger.info('Double click performed')
+        logger.info(f'🌐 Navigating to: {url}')
+        # Try to use default browser
+        if os.name == 'nt':  # Windows
+            subprocess.Popen(f'start {url}', shell=True)
+        else:  # macOS/Linux
+            subprocess.Popen(['xdg-open', url])  # Linux
+        return {'ok': True, 'message': f'Opened {url}'}
+    except Exception as e:
+        logger.error(f'Failed to open URL: {e}')
+        return {'ok': False, 'error': f'Failed to open {url}'}
+
+async def handle_mouse_click(payload: Dict[str, Any]):
+    """Handle mouse clicks"""
+    x = payload.get('x')
+    y = payload.get('y')
+    button = payload.get('button', 'left')
+    
+    try:
+        if x is not None and y is not None:
+            pyautogui.click(x=x, y=y, button=button)
+            logger.info(f'🖱️ Clicked at ({x}, {y}) with {button} button')
+        else:
+            pyautogui.click(button=button)
+            logger.info(f'🖱️ Clicked at current position with {button} button')
         return {'ok': True}
     except pyautogui.FailSafeException:
         logger.warning('Action aborted by failsafe.')
         return {'ok': False, 'error': 'Failsafe triggered'}
 
-async def handle_scroll(payload: Dict[str, Any]):
-    """Handle mouse scroll"""
+async def handle_mouse_move(payload: Dict[str, Any]):
+    """Handle mouse movement"""
+    x = payload.get('x')
+    y = payload.get('y')
+    duration = payload.get('duration', 0.5)
+    
+    try:
+        if x is not None and y is not None:
+            pyautogui.moveTo(x, y, duration=duration)
+            logger.info(f'🖱️ Moved mouse to ({x}, {y})')
+            return {'ok': True}
+        else:
+            return {'ok': False, 'error': 'Missing coordinates'}
+    except pyautogui.FailSafeException:
+        logger.warning('Action aborted by failsafe.')
+        return {'ok': False, 'error': 'Failsafe triggered'}
+
+async def handle_mouse_scroll(payload: Dict[str, Any]):
+    """Handle mouse scrolling"""
     direction = payload.get('direction', 'down')
-    clicks = -100 if direction == 'down' else 100
+    clicks = payload.get('clicks', 3)
+    scroll_amount = -clicks if direction == 'down' else clicks
+    
     try:
-        pyautogui.scroll(clicks)
-        logger.info(f'Scrolled {direction}')
+        pyautogui.scroll(scroll_amount)
+        logger.info(f'📜 Scrolled {direction}')
         return {'ok': True}
     except pyautogui.FailSafeException:
         logger.warning('Action aborted by failsafe.')
         return {'ok': False, 'error': 'Failsafe triggered'}
 
-async def handle_press_key(payload: Dict[str, Any]):
-    """Press a single key"""
+async def handle_keyboard_type(payload: Dict[str, Any]):
+    """Handle keyboard typing"""
+    text = payload.get('text', '')
+    then_press = payload.get('then_press')
+    
+    try:
+        pyautogui.write(text)
+        logger.info(f'⌨️ Typed: {text}')
+        
+        if then_press:
+            pyautogui.press(then_press)
+            logger.info(f'⌨️ Pressed: {then_press}')
+            
+        return {'ok': True}
+    except pyautogui.FailSafeException:
+        logger.warning('Action aborted by failsafe.')
+        return {'ok': False, 'error': 'Failsafe triggered'}
+
+async def handle_keyboard_press(payload: Dict[str, Any]):
+    """Handle key presses"""
     key = payload.get('key')
     try:
         pyautogui.press(key)
-        logger.info(f'Pressed key: {key}')
+        logger.info(f'⌨️ Pressed key: {key}')
         return {'ok': True}
     except pyautogui.FailSafeException:
         logger.warning('Action aborted by failsafe.')
         return {'ok': False, 'error': 'Failsafe triggered'}
 
+async def handle_system_command(payload: Dict[str, Any]):
+    """Handle system commands"""
+    action = payload.get('action')
+    commands = {
+        'lock': 'rundll32.exe user32.dll,LockWorkStation',
+        'sleep': 'rundll32.exe powrprof.dll,SetSuspendState 0,1,0',
+        'shutdown': 'shutdown /s /t 0',
+        'restart': 'shutdown /r /t 0',
+    }
+    
+    if action in commands:
+        try:
+            logger.info(f'⚙️ Executing system command: {action}')
+            subprocess.run(commands[action], shell=True, timeout=5)
+            return {'ok': True, 'message': f'Executed {action}'}
+        except Exception as e:
+            logger.error(f'System command failed: {e}')
+            return {'ok': False, 'error': f'Failed to {action}'}
+    else:
+        return {'ok': False, 'error': f'Unknown system action: {action}'}
+
 async def handle_ai_command(payload: Dict[str, Any]):
-    """Handle natural language commands"""
+    """Handle natural language commands using AI"""
     text = payload.get('text', '')
     if not text:
         return {'ok': False, 'error': 'No text provided'}
     
-    # Parse the natural language command
-    parsed_command = command_mapper.parse_command(text)
-    logger.info(f"Parsed command: {parsed_command}")
-    
-    # Execute the parsed command
-    command_type = parsed_command['type']
-    if command_type in ENHANCED_HANDLERS:
-        result = await ENHANCED_HANDLERS[command_type](parsed_command)
-        result['parsed_command'] = parsed_command
-        return result
-    else:
-        return {'ok': False, 'error': f'Unknown command type: {command_type}'}
-
-# Original handlers (updated to return results)
-async def handle_click(payload: Dict[str, Any]):
-    x = payload.get('x')
-    y = payload.get('y')
-    button = payload.get('button', 'left')
-    logger.info('Performing click: x=%s y=%s button=%s', x, y, button)
     try:
-        if x is not None and y is not None:
-            pyautogui.click(x=x, y=y, button=button)
-        else:
-            pyautogui.click(button=button)
-        return {'ok': True}
-    except pyautogui.FailSafeException:
-        logger.warning('Action aborted by failsafe.')
-        return {'ok': False, 'error': 'Failsafe triggered'}
+        # Process with AI
+        ai_commands = await ai_processor.process_command(text)
+        logger.info(f"🤖 AI generated {len(ai_commands)} command(s)")
+        
+        # Execute all commands in sequence
+        results = []
+        for i, cmd in enumerate(ai_commands):
+            logger.info(f"Executing command {i+1}: {cmd}")
+            intent = cmd.get('intent')
+            if intent in AI_HANDLERS:
+                result = await AI_HANDLERS[intent](cmd)
+                results.append(result)
+                
+                # Small delay between commands
+                if i < len(ai_commands) - 1:
+                    await asyncio.sleep(0.5)
+            else:
+                results.append({'ok': False, 'error': f'Unknown intent: {intent}'})
+        
+        return {
+            'ok': all(r.get('ok', False) for r in results),
+            'results': results,
+            'ai_commands': ai_commands,
+            'command_count': len(ai_commands)
+        }
+        
+    except Exception as e:
+        logger.error(f'AI command processing failed: {e}')
+        return {'ok': False, 'error': str(e)}
+
+# AI Intent Handlers
+AI_HANDLERS = {
+    'open_app': handle_open_app,
+    'navigate_url': handle_navigate_url,
+    'mouse_click': handle_mouse_click,
+    'mouse_move': handle_mouse_move,
+    'mouse_scroll': handle_mouse_scroll,
+    'keyboard_type': handle_keyboard_type,
+    'keyboard_press': handle_keyboard_press,
+    'system_command': handle_system_command,
+}
+
+# Original handlers (for backward compatibility)
+async def handle_click(payload: Dict[str, Any]):
+    return await handle_mouse_click(payload)
 
 async def handle_type(payload: Dict[str, Any]):
-    text = payload.get('text', '')
-    interval = float(payload.get('interval', 0.05))
-    logger.info('Typing text: %s', text)
-    try:
-        pyautogui.write(text, interval=interval)
-        return {'ok': True}
-    except pyautogui.FailSafeException:
-        logger.warning('Action aborted by failsafe.')
-        return {'ok': False, 'error': 'Failsafe triggered'}
+    return await handle_keyboard_type(payload)
 
 async def handle_move(payload: Dict[str, Any]):
-    x = payload.get('x')
-    y = payload.get('y')
-    duration = float(payload.get('duration', 0.1))
-    logger.info('Moving mouse to x=%s y=%s duration=%s', x, y, duration)
-    try:
-        if x is not None and y is not None:
-            pyautogui.moveTo(x, y, duration=duration)
-        return {'ok': True}
-    except pyautogui.FailSafeException:
-        logger.warning('Action aborted by failsafe.')
-        return {'ok': False, 'error': 'Failsafe triggered'}
+    return await handle_mouse_move(payload)
 
-# Enhanced command handlers
+async def handle_system_direct(payload: Dict[str, Any]):
+    return await handle_system_command(payload)
+
+# Combined handlers
 ENHANCED_HANDLERS = {
+    **AI_HANDLERS,
     'click': handle_click,
     'type': handle_type,
     'move': handle_move,
-    'launch_app': handle_launch_app,
-    'system_command': handle_system_command,
-    'double_click': handle_double_click,
-    'scroll': handle_scroll,
-    'press_key': handle_press_key,
+    'system_command': handle_system_direct,
     'ai_command': handle_ai_command,
 }
 
 # ==========================================================
-# Relay Connection (same as before)
+# Relay Connection (same structure)
 # ==========================================================
 
 async def handle_relay_message(websocket, message):
@@ -380,7 +485,7 @@ async def connect_to_relay():
     
     try:
         websocket = await websockets.connect(ws_url, ping_interval=20, ping_timeout=10)
-        logger.info('✅ Connected to relay server as PC client')
+        logger.info('✅ Connected to relay server as PC agent')
         
         await websocket.send(json.dumps({'type': 'auth', 'token': TOKEN}))
         
@@ -397,10 +502,11 @@ async def connect_to_relay():
         logger.info('🔌 Disconnected from relay')
 
 async def main():
-    logger.info('🚀 Starting PC Agent (AI Control Layer)')
+    logger.info('🚀 Starting PC Agent (AI/NLP Enhanced)')
     logger.info('🔑 Token: %s', TOKEN)
     logger.info('🌐 Relay URL: %s', RELAY_URL)
-    logger.info('🤖 Available commands: %s', list(ENHANCED_HANDLERS.keys()))
+    logger.info('🤖 AI Enabled: %s', ai_processor.enabled)
+    logger.info('🎯 Available intents: %s', list(AI_HANDLERS.keys()))
     
     # Keep trying to connect/reconnect
     reconnect_delay = 5
@@ -417,15 +523,19 @@ async def main():
         await asyncio.sleep(reconnect_delay)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='PC Agent with AI/NLP Control Layer')
     parser.add_argument('--relay-url', help='Relay server URL')
     parser.add_argument('--token', help='Authentication token')
+    parser.add_argument('--openai-key', help='OpenAI API key')
     args = parser.parse_args()
     
     if args.relay_url:
         RELAY_URL = args.relay_url
     if args.token:
         TOKEN = args.token
+    if args.openai_key:
+        OPENAI_API_KEY = args.openai_key
+        ai_processor = AINLPProcessor(OPENAI_API_KEY)
         
     try:
         asyncio.run(main())

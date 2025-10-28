@@ -52,6 +52,9 @@
     .ai-btn { background: #9C27B0; color: white; }
     .ai-btn:hover { background: #7B1FA2; }
     
+    .smart-btn { background: #FF9800; color: white; }
+    .smart-btn:hover { background: #F57C00; }
+    
     .danger-btn { background: #ff4444; color: white; }
     .danger-btn:hover { background: #cc0000; }
     
@@ -120,9 +123,21 @@
       font-size: 14px;
     }
     
-    .command-examples h4 {
+    .smart-examples {
+      background: #fff3e0;
+      padding: 10px;
+      border-radius: 6px;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    
+    .command-examples h4, .smart-examples h4 {
       margin: 0 0 8px 0;
       color: #7B1FA2;
+    }
+    
+    .smart-examples h4 {
+      color: #EF6C00;
     }
     
     .example-grid {
@@ -138,15 +153,48 @@
       border-radius: 4px;
       border-left: 3px solid #9C27B0;
     }
+    
+    .smart-example-item {
+      background: white;
+      padding: 6px 8px;
+      border-radius: 4px;
+      border-left: 3px solid #FF9800;
+    }
+    
+    .ai-status {
+      margin-top: 10px;
+      padding: 8px;
+      border-radius: 4px;
+      display: none;
+      font-size: 14px;
+    }
+    
+    .ai-processing {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeaa7;
+    }
+    
+    .ai-success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .ai-error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>📱 → 💻 Controller</h1>
-    <div class="subtitle">AI Cloud Relay Version</div>
+    <div class="subtitle">AI Cloud Relay with Smart Commands</div>
 
     <div class="connection-info">
-      <strong>🚀 How it works:</strong> Both your phone and PC connect to a cloud relay server. Now with AI voice commands!
+      <strong>🚀 How it works:</strong> Both your phone and PC connect to a cloud relay server. Now with AI-powered smart commands!
     </div>
 
     <div class="section">
@@ -163,13 +211,38 @@
     <div id="status" class="status status-disconnected">Disconnected</div>
 
     <div class="section">
+      <h3>🧠 AI Smart Commands</h3>
+      <input id="smartCommand" type="text" placeholder="Try: 'Open Chrome and go to YouTube then search for cats'" 
+             style="width:100%; margin-bottom: 8px;" />
+      <button id="sendSmartCommand" class="smart-btn">Send Smart Command</button>
+      
+      <div id="aiStatus" class="ai-status">
+        <strong>AI Status:</strong> <span id="aiStatusText">Ready</span>
+      </div>
+      
+      <div class="smart-examples">
+        <h4>🎯 Smart Examples:</h4>
+        <div class="example-grid">
+          <div class="smart-example-item">"Open Chrome and go to GitHub"</div>
+          <div class="smart-example-item">"Type hello and press enter"</div>
+          <div class="smart-example-item">"Move to 100,200 and right click"</div>
+          <div class="smart-example-item">"Open notepad and type my notes"</div>
+          <div class="smart-example-item">"Scroll down a bit then click"</div>
+          <div class="smart-example-item">"Lock my computer please"</div>
+          <div class="smart-example-item">"Open calculator and word"</div>
+          <div class="smart-example-item">"Search for weather and press enter"</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
       <h3>🤖 AI Voice Commands</h3>
       <input id="voiceCommand" type="text" placeholder="Try: 'open Chrome' or 'click at 100,200'" 
              style="width:100%; margin-bottom: 8px;" />
       <button id="sendCommand" class="ai-btn">Send AI Command</button>
       
       <div class="command-examples">
-        <h4>💡 Try these commands:</h4>
+        <h4>💡 Basic Examples:</h4>
         <div class="example-grid">
           <div class="example-item">"open chrome"</div>
           <div class="example-item">"open notepad"</div>
@@ -198,6 +271,8 @@
       <button id="clickBtn" class="action-btn">Click (left button)</button>
       <button id="rightClickBtn" class="action-btn">Right Click</button>
       <button id="doubleClickBtn" class="action-btn">Double Click</button>
+      <button id="scrollUpBtn" class="action-btn">Scroll Up</button>
+      <button id="scrollDownBtn" class="action-btn">Scroll Down</button>
     </div>
 
     <div class="section">
@@ -241,12 +316,41 @@
     let ws;
     const status = document.getElementById('status');
     const logEl = document.getElementById('log');
+    const aiStatus = document.getElementById('aiStatus');
+    const aiStatusText = document.getElementById('aiStatusText');
     let pcConnected = false;
 
     function log(...args) {
       const timestamp = new Date().toLocaleTimeString();
       const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
       logEl.textContent = `[${timestamp}] ${line}\n` + logEl.textContent;
+    }
+
+    function updateAIStatus(message, type = 'processing') {
+      aiStatus.style.display = 'block';
+      aiStatusText.textContent = message;
+      
+      // Remove all classes
+      aiStatus.className = 'ai-status';
+      
+      // Add appropriate class
+      switch(type) {
+        case 'processing':
+          aiStatus.classList.add('ai-processing');
+          break;
+        case 'success':
+          aiStatus.classList.add('ai-success');
+          break;
+        case 'error':
+          aiStatus.classList.add('ai-error');
+          break;
+      }
+    }
+
+    function hideAIStatus() {
+      setTimeout(() => {
+        aiStatus.style.display = 'none';
+      }, 5000);
     }
 
     function updateStatus(message, type) {
@@ -367,7 +471,25 @@
             return;
           }
           
-          // Handle AI command responses with parsed command info
+          // Handle AI command responses with detailed parsing
+          if (data.ai_commands) {
+            log('🤖 AI Analysis Complete:', {
+              original_command: data.text || 'Unknown',
+              commands_generated: data.command_count,
+              ai_commands: data.ai_commands,
+              execution_results: data.results
+            });
+            
+            if (data.ok) {
+              updateAIStatus(`✅ Successfully executed ${data.command_count} AI command(s)`, 'success');
+            } else {
+              updateAIStatus(`❌ AI execution failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+            hideAIStatus();
+            return;
+          }
+          
+          // Handle parsed command responses
           if (data.parsed_command) {
             log('🤖 AI Response:', {
               original: data.parsed_command.original_text,
@@ -423,6 +545,26 @@
       log('📤 Sending:', cmd);
       ws.send(JSON.stringify(cmd));
     }
+
+    // AI Smart Commands
+    document.getElementById('sendSmartCommand').addEventListener('click', () => {
+      const command = document.getElementById('smartCommand').value.trim();
+      if (!command) {
+        alert('Please enter a smart command');
+        return;
+      }
+
+      updateAIStatus('🤖 AI is processing your command...', 'processing');
+      sendCommand({type: 'ai_command', text: command});
+      document.getElementById('smartCommand').value = '';
+    });
+
+    // Allow Enter key in smart command field
+    document.getElementById('smartCommand').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('sendSmartCommand').click();
+      }
+    });
 
     // AI Voice Commands
     document.getElementById('sendCommand').addEventListener('click', () => {
@@ -487,6 +629,12 @@
     document.getElementById('doubleClickBtn').addEventListener('click', () => 
       sendCommand({type: 'ai_command', text: 'double click'}));
 
+    document.getElementById('scrollUpBtn').addEventListener('click', () => 
+      sendCommand({type: 'ai_command', text: 'scroll up'}));
+
+    document.getElementById('scrollDownBtn').addEventListener('click', () => 
+      sendCommand({type: 'ai_command', text: 'scroll down'}));
+
     // Custom Actions
     document.getElementById('moveBtn').addEventListener('click', () => {
       const x = parseInt(document.getElementById('xCoord').value, 10);
@@ -540,6 +688,7 @@
     log('💡 Tip: Make sure your PC agent is running and connected to the same relay server');
     log('💡 Tip: Use the same token on both phone and PC');
     log('💡 Tip: Try AI commands like "open chrome" or "type hello world"');
+    log('💡 Tip: Use Smart Commands for complex tasks like "Open Chrome and go to YouTube"');
   </script>
 </body>
 </html>
