@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Phone → PC Controller (Cloud Relay)</title>
+  <title>Phone → PC Controller (AI Cloud Relay)</title>
   <style>
     body { 
       font-family: system-ui, Arial, sans-serif; 
@@ -48,6 +48,12 @@
     
     .action-btn { background: #2196F3; color: white; }
     .action-btn:hover { background: #0b7dda; }
+    
+    .ai-btn { background: #9C27B0; color: white; }
+    .ai-btn:hover { background: #7B1FA2; }
+    
+    .danger-btn { background: #ff4444; color: white; }
+    .danger-btn:hover { background: #cc0000; }
     
     .row { 
       display: flex; 
@@ -105,15 +111,42 @@
       margin-bottom: 15px;
       font-size: 14px;
     }
+    
+    .command-examples {
+      background: #f3e5f5;
+      padding: 10px;
+      border-radius: 6px;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    
+    .command-examples h4 {
+      margin: 0 0 8px 0;
+      color: #7B1FA2;
+    }
+    
+    .example-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      font-size: 13px;
+    }
+    
+    .example-item {
+      background: white;
+      padding: 6px 8px;
+      border-radius: 4px;
+      border-left: 3px solid #9C27B0;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>📱 → 💻 Controller</h1>
-    <div class="subtitle">Cloud Relay Version</div>
+    <div class="subtitle">AI Cloud Relay Version</div>
 
     <div class="connection-info">
-      <strong>How it works:</strong> Both your phone and PC connect to a cloud relay server. No port forwarding required!
+      <strong>🚀 How it works:</strong> Both your phone and PC connect to a cloud relay server. Now with AI voice commands!
     </div>
 
     <div class="section">
@@ -130,10 +163,41 @@
     <div id="status" class="status status-disconnected">Disconnected</div>
 
     <div class="section">
+      <h3>🤖 AI Voice Commands</h3>
+      <input id="voiceCommand" type="text" placeholder="Try: 'open Chrome' or 'click at 100,200'" 
+             style="width:100%; margin-bottom: 8px;" />
+      <button id="sendCommand" class="ai-btn">Send AI Command</button>
+      
+      <div class="command-examples">
+        <h4>💡 Try these commands:</h4>
+        <div class="example-grid">
+          <div class="example-item">"open chrome"</div>
+          <div class="example-item">"open notepad"</div>
+          <div class="example-item">"type hello world"</div>
+          <div class="example-item">"click at 100,200"</div>
+          <div class="example-item">"right click"</div>
+          <div class="example-item">"double click"</div>
+          <div class="example-item">"scroll up"</div>
+          <div class="example-item">"move to 500,300"</div>
+        </div>
+      </div>
+      
+      <div class="row" style="margin-top: 12px;">
+        <button id="quickOpenChrome" class="ai-btn small">Open Chrome</button>
+        <button id="quickNotepad" class="ai-btn small">Open Notepad</button>
+      </div>
+      <div class="row">
+        <button id="quickCalculator" class="ai-btn small">Open Calculator</button>
+        <button id="quickFileExplorer" class="ai-btn small">File Explorer</button>
+      </div>
+    </div>
+
+    <div class="section">
       <h3>⚡ Quick Actions</h3>
       <button id="moveCenter" class="action-btn">Move mouse to center (100,100)</button>
       <button id="clickBtn" class="action-btn">Click (left button)</button>
       <button id="rightClickBtn" class="action-btn">Right Click</button>
+      <button id="doubleClickBtn" class="action-btn">Double Click</button>
     </div>
 
     <div class="section">
@@ -153,13 +217,17 @@
           <button id="typeBtn" class="action-btn" style="flex: 1;">Type Text</button>
         </div>
       </div>
-      <div class="row">
-        <button id="quickOpenChrome" class="action-btn small">Open Chrome</button>
-        <button id="quickNotepad" class="action-btn small">Open Notepad</button>
-      </div>
+    </div>
+
+    <div class="section">
+      <h3>🔧 System Commands</h3>
       <div class="row">
         <button id="quickLock" class="action-btn small">Lock PC</button>
-        <button id="quickShutdown" class="action-btn small" style="background: #ff4444;">Shutdown</button>
+        <button id="quickSleep" class="action-btn small">Sleep</button>
+      </div>
+      <div class="row">
+        <button id="quickShutdown" class="danger-btn small">Shutdown</button>
+        <button id="quickRestart" class="danger-btn small">Restart</button>
       </div>
     </div>
 
@@ -299,8 +367,17 @@
             return;
           }
           
-          // Handle regular responses
-          log('📨 Response:', data);
+          // Handle AI command responses with parsed command info
+          if (data.parsed_command) {
+            log('🤖 AI Response:', {
+              original: data.parsed_command.original_text,
+              parsed: data.parsed_command.type,
+              confidence: data.parsed_command.confidence,
+              result: data.ok ? '✅ Success' : '❌ Failed'
+            });
+          } else {
+            log('📨 Response:', data);
+          }
         } catch(e) {
           log('📨 Message:', ev.data);
         }
@@ -347,6 +424,56 @@
       ws.send(JSON.stringify(cmd));
     }
 
+    // AI Voice Commands
+    document.getElementById('sendCommand').addEventListener('click', () => {
+      const command = document.getElementById('voiceCommand').value.trim();
+      if (command) {
+        sendCommand({type: 'ai_command', text: command});
+        document.getElementById('voiceCommand').value = '';
+      } else {
+        alert('Please enter a command');
+      }
+    });
+
+    // Allow Enter key in AI command field
+    document.getElementById('voiceCommand').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('sendCommand').click();
+      }
+    });
+
+    // Quick AI Commands
+    document.getElementById('quickOpenChrome').addEventListener('click', () => 
+      sendCommand({type: 'ai_command', text: 'open chrome'}));
+
+    document.getElementById('quickNotepad').addEventListener('click', () => 
+      sendCommand({type: 'ai_command', text: 'open notepad'}));
+
+    document.getElementById('quickCalculator').addEventListener('click', () => 
+      sendCommand({type: 'ai_command', text: 'open calculator'}));
+
+    document.getElementById('quickFileExplorer').addEventListener('click', () => 
+      sendCommand({type: 'ai_command', text: 'open file explorer'}));
+
+    // System Commands
+    document.getElementById('quickLock').addEventListener('click', () => 
+      sendCommand({type: 'ai_command', text: 'lock computer'}));
+
+    document.getElementById('quickSleep').addEventListener('click', () => 
+      sendCommand({type: 'ai_command', text: 'sleep'}));
+
+    document.getElementById('quickShutdown').addEventListener('click', () => {
+      if (confirm('⚠️ Are you sure you want to SHUTDOWN the PC? This will turn off the computer!')) {
+        sendCommand({type: 'ai_command', text: 'shutdown'});
+      }
+    });
+
+    document.getElementById('quickRestart').addEventListener('click', () => {
+      if (confirm('⚠️ Are you sure you want to RESTART the PC? This will reboot the computer!')) {
+        sendCommand({type: 'ai_command', text: 'restart'});
+      }
+    });
+
     // Quick Actions
     document.getElementById('moveCenter').addEventListener('click', () => 
       sendCommand({type: 'move', x: 100, y: 100, duration: 0.2}));
@@ -356,6 +483,9 @@
     
     document.getElementById('rightClickBtn').addEventListener('click', () => 
       sendCommand({type: 'click', button: 'right'}));
+
+    document.getElementById('doubleClickBtn').addEventListener('click', () => 
+      sendCommand({type: 'ai_command', text: 'double click'}));
 
     // Custom Actions
     document.getElementById('moveBtn').addEventListener('click', () => {
@@ -395,53 +525,21 @@
       }
     });
 
-    // Set default URL to common Render pattern
+    // Set default URL to your Render app
     (function setDefaultUrl(){
       const input = document.getElementById('wsUrl');
-      // You can set this to your actual Render app URL
-      const defaultUrl = 'wss://phone-controller-1.onrender.com.com';
+      const defaultUrl = 'wss://phone-controller-1.onrender.com';
       input.value = defaultUrl;
       input.placeholder = defaultUrl;
       
       // Set focus to token input for convenience
       document.getElementById('tokenInput').focus();
     })();
-    // Add to the existing JavaScript
-    document.getElementById('sendCommand').addEventListener('click', () => {
-        const command = document.getElementById('voiceCommand').value.trim();
-        if (command) {
-            sendCommand({type: 'ai_command', text: command});
-            document.getElementById('voiceCommand').value = '';
-        } else {
-            alert('Please enter a command');
-        }
-    });
 
-    // Quick command buttons
-    document.getElementById('quickOpenChrome').addEventListener('click', () => 
-        sendCommand({type: 'ai_command', text: 'open chrome'}));
-
-    document.getElementById('quickNotepad').addEventListener('click', () => 
-        sendCommand({type: 'ai_command', text: 'open notepad'}));
-
-    document.getElementById('quickLock').addEventListener('click', () => 
-        sendCommand({type: 'ai_command', text: 'lock computer'}));
-
-    document.getElementById('quickShutdown').addEventListener('click', () => {
-        if (confirm('Are you sure you want to shutdown the PC?')) {
-            sendCommand({type: 'ai_command', text: 'shutdown'});
-        }
-    });
-
-// Allow Enter key in command field
-document.getElementById('voiceCommand').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        document.getElementById('sendCommand').click();
-    }
-});
     // Add some helpful tips
     log('💡 Tip: Make sure your PC agent is running and connected to the same relay server');
     log('💡 Tip: Use the same token on both phone and PC');
+    log('💡 Tip: Try AI commands like "open chrome" or "type hello world"');
   </script>
 </body>
 </html>
