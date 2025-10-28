@@ -153,6 +153,14 @@
           <button id="typeBtn" class="action-btn" style="flex: 1;">Type Text</button>
         </div>
       </div>
+      <div class="row">
+        <button id="quickOpenChrome" class="action-btn small">Open Chrome</button>
+        <button id="quickNotepad" class="action-btn small">Open Notepad</button>
+      </div>
+      <div class="row">
+        <button id="quickLock" class="action-btn small">Lock PC</button>
+        <button id="quickShutdown" class="action-btn small" style="background: #ff4444;">Shutdown</button>
+      </div>
     </div>
 
     <div class="section">
@@ -398,7 +406,39 @@
       // Set focus to token input for convenience
       document.getElementById('tokenInput').focus();
     })();
+    // Add to the existing JavaScript
+    document.getElementById('sendCommand').addEventListener('click', () => {
+        const command = document.getElementById('voiceCommand').value.trim();
+        if (command) {
+            sendCommand({type: 'ai_command', text: command});
+            document.getElementById('voiceCommand').value = '';
+        } else {
+            alert('Please enter a command');
+        }
+    });
 
+    // Quick command buttons
+    document.getElementById('quickOpenChrome').addEventListener('click', () => 
+        sendCommand({type: 'ai_command', text: 'open chrome'}));
+
+    document.getElementById('quickNotepad').addEventListener('click', () => 
+        sendCommand({type: 'ai_command', text: 'open notepad'}));
+
+    document.getElementById('quickLock').addEventListener('click', () => 
+        sendCommand({type: 'ai_command', text: 'lock computer'}));
+
+    document.getElementById('quickShutdown').addEventListener('click', () => {
+        if (confirm('Are you sure you want to shutdown the PC?')) {
+            sendCommand({type: 'ai_command', text: 'shutdown'});
+        }
+    });
+
+// Allow Enter key in command field
+document.getElementById('voiceCommand').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        document.getElementById('sendCommand').click();
+    }
+});
     // Add some helpful tips
     log('💡 Tip: Make sure your PC agent is running and connected to the same relay server');
     log('💡 Tip: Use the same token on both phone and PC');
