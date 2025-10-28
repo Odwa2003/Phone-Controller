@@ -1,4 +1,4 @@
-# pc_agent_relay.py
+# pc_agent_relay_fixed.py
 import asyncio
 import json
 import logging
@@ -7,6 +7,7 @@ import pyautogui
 import websockets
 import os
 import argparse
+import urllib.parse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('pc_agent')
@@ -17,7 +18,7 @@ pyautogui.FAILSAFE = True
 RELAY_URL = os.environ.get('RELAY_URL', 'wss://phone-controller-1.onrender.com')
 TOKEN = os.environ.get('PC_AGENT_TOKEN', 'helloworld')
 
-# Command handlers (same as before)
+# Command handlers
 async def handle_click(payload: Dict[str, Any]):
     x = payload.get('x')
     y = payload.get('y')
@@ -57,53 +58,78 @@ COMMAND_HANDLERS = {
     'move': handle_move,
 }
 
-async def connect_to_relay():
-    import urllib.parse
-    params = {'token': TOKEN, 'client': 'pc'}
-    query_string = urllib.parse.urlencode(params)
-    ws_url = f"{RELAY_URL}?{query_string}"
-    
-    logger.info(f'Connecting to relay: {ws_url}')
-    
-    try:
-        async with websockets.connect(ws_url) as websocket:
-            logger.info('✅ Connected to relay server as PC client')
-            
-            # Send authentication (if your relay expects it)
-            await websocket.send(json.dumps({'type': 'auth', 'token': TOKEN}))
-            
-            # Listen for messages from relay
-            async for message in websocket:
-                await handle_relay_message(websocket, message)
-                
-    except Exception as e:
-        logger.error(f'❌ Connection failed: {e}')
-
 async def handle_relay_message(websocket, message):
+    """Handle messages received from relay server"""
     try:
         data = json.loads(message)
         logger.info('Received command: %s', data)
         
-        # Handle status messages
+        # Handle relay status messages
         if data.get('type') == 'relay_status':
-            logger.info('Relay status: %s', data)
+            if data.get('phone_connected'):
+                logger.info('📱 Phone connected to relay')
+            elif data.get('phone_connected') is False:
+                logger.info('📱 Phone disconnected from relay')
+            return
+        
+        # Handle authentication messages (just acknowledge them)
+        if data.get('type') == 'auth':
+            logger.info('🔐 Auth request received')
+            # Send auth response back to phone through relay
+            response = {'ok': True, 'auth': True, 'type': 'auth_response'}
+            await websocket.send(json.dumps(response))
             return
             
-        # Process commands
+        # Process regular commands
         cmd_type = data.get('type')
         if cmd_type in COMMAND_HANDLERS:
             handler = COMMAND_HANDLERS[cmd_type]
             await handler(data)
             # Send success response
-            if websocket.open:
-                await websocket.send(json.dumps({'ok': True, 'command': cmd_type}))
+            response = {'ok': True, 'command': cmd_type}
+            await websocket.send(json.dumps(response))
+            logger.info('✅ Command executed: %s', cmd_type)
         else:
-            logger.warning('Unknown command type: %s', cmd_type)
+            logger.warning('❌ Unknown command type: %s', cmd_type)
+            response = {'ok': False, 'error': f'Unknown command type: {cmd_type}'}
+            await websocket.send(json.dumps(response))
             
     except Exception as e:
-        logger.error('Error handling message: %s', e)
-        if websocket.open:
-            await websocket.send(json.dumps({'ok': False, 'error': str(e)}))
+        logger.error('❌ Error handling message: %s', e)
+        try:
+            response = {'ok': False, 'error': str(e)}
+            await websocket.send(json.dumps(response))
+        except:
+            logger.error('Failed to send error response')
+
+async def connect_to_relay():
+    params = {'token': TOKEN, 'client': 'pc'}
+    query_string = urllib.parse.urlencode(params)
+    ws_url = f"{RELAY_URL}?{query_string}"
+    
+    logger.info('🔗 Connecting to relay: %s', ws_url)
+    
+    try:
+        # Don't use async with - it closes the connection automatically
+        websocket = await websockets.connect(ws_url, ping_interval=20, ping_timeout=10)
+        logger.info('✅ Connected to relay server as PC client')
+        
+        # Send initial auth to identify ourselves
+        await websocket.send(json.dumps({'type': 'auth', 'token': TOKEN}))
+        
+        # Listen for messages continuously
+        async for message in websocket:
+            await handle_relay_message(websocket, message)
+            
+    except websockets.exceptions.ConnectionClosed:
+        logger.warning('🔌 Connection closed by relay')
+    except Exception as e:
+        logger.error('❌ Connection error: %s', e)
+    finally:
+        # Clean up if websocket exists
+        if 'websocket' in locals():
+            await websocket.close()
+        logger.info('🔌 Disconnected from relay')
 
 async def main():
     logger.info('🚀 Starting PC Agent (Relay Mode)')
@@ -111,13 +137,18 @@ async def main():
     logger.info('🌐 Relay URL: %s', RELAY_URL)
     
     # Keep trying to connect/reconnect
+    reconnect_delay = 5
     while True:
         try:
             await connect_to_relay()
+        except KeyboardInterrupt:
+            logger.info('Received interrupt, shutting down...')
+            break
         except Exception as e:
-            logger.error('Disconnected from relay: %s', e)
-            logger.info('Reconnecting in 5 seconds...')
-            await asyncio.sleep(5)
+            logger.error('Unexpected error: %s', e)
+        
+        logger.info('🔄 Reconnecting in %d seconds...', reconnect_delay)
+        await asyncio.sleep(reconnect_delay)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -133,4 +164,4 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info('Shutting down...')
+        logger.info('👋 Shutting down...')
