@@ -22,7 +22,7 @@ pyautogui.FAILSAFE = True
 # ==========================================================
 RELAY_URL = os.environ.get('RELAY_URL', 'wss://phone-controller-1.onrender.com')
 TOKEN = os.environ.get('PC_AGENT_TOKEN', 'helloworld')
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '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')
 
 # ==========================================================
 # AI/NLP Layer with OpenAI
@@ -147,12 +147,14 @@ class PatternMatcher:
             'word': 'winword', 'excel': 'excel', 'powerpoint': 'powerpnt',
             'vs code': 'code', 'code': 'code', 'command prompt': 'cmd',
             'terminal': 'cmd', 'task manager': 'taskmgr', 'control panel': 'control',
+            'mail': 'outlookmail:',
         }
         
         self.websites = {
             'youtube': 'youtube.com', 'google': 'google.com', 'github': 'github.com',
             'facebook': 'facebook.com', 'twitter': 'twitter.com', 'reddit': 'reddit.com',
             'gmail': 'gmail.com', 'outlook': 'outlook.com', 'amazon': 'amazon.com',
+            'render': 'render.com',
         }
 
     def parse_command(self, text: str) -> List[Dict[str, Any]]:
@@ -233,7 +235,7 @@ async def handle_open_app(payload: Dict[str, Any]):
         try:
             logger.info(f'🚀 Launching application: {app}')
             if os.name == 'nt':  # Windows
-                subprocess.Popen(app, shell=True)
+                subprocess.Popen("start " + app, shell=True)
             else:  # macOS/Linux
                 subprocess.Popen([app])
             return {'ok': True, 'message': f'Launched {app}'}
