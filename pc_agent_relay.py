@@ -21,7 +21,7 @@ try:
 except Exception as e:
     HAS_PYGUI = False
     logger.warning(f"pyautogui not available; GUI features disabled: {e}")
-
+#hello
 # ==========================================================
 # Configuration
 # ==========================================================
