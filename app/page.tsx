@@ -64,7 +64,7 @@ interface WebSocketMessage {
 }
 
 const PCAgentInterface: React.FC = () => {
-  const [wsUrl, setWsUrl] = useState<string>('wss://phone-controller-1.onrender.com');
+  const [wsUrl, setWsUrl] = useState<string>('wss://relay-server-d465.onrender.com/');
   const [token, setToken] = useState<string>('');
   const [connected, setConnected] = useState<boolean>(false);
   const [connecting, setConnecting] = useState<boolean>(false);
