@@ -1,29 +1,36 @@
-Phone-Controller — Step 1: PC control basics
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-This small demo shows how to automate keyboard/mouse actions on your PC using Python and pyautogui.
+## Getting Started
 
-Setup
+First, run the development server:
 
-1. Install Python 3.8+ from https://www.python.org/ and ensure `python` and `pip` are on your PATH.
-2. Create a virtual environment (recommended):
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
 
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1  # PowerShell
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-3. Install dependencies:
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-   pip install -r requirements.txt
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-Run the demo
+## Learn More
 
-   python demo.py
+To learn more about Next.js, take a look at the following resources:
 
-Safety notes
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
-- PyAutoGUI has a failsafe feature: move the mouse to the top-left corner of the screen to raise an exception and stop automated actions.
-- The demo waits 5 seconds before acting so you can switch focus or cancel.
-- Do not run automation scripts that type or click with elevated privileges unless you understand the risks.
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-Next steps
+## Deploy on Vercel
 
-- We'll add a websockets-based server so your phone can send commands to this script. We'll plan authentication and rate-limiting to keep it safe.
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
